@@ -19,7 +19,7 @@ headers = {
 
 def download_one(d):
     assert len(d['url']) == 1
-    path = f'tmp/{d["preffix"]}/{d["image_id"]}.jpg'
+    path = f'data/{d["preffix"]}/{d["image_id"]}.jpg'
     if os.path.isfile(path):
         return
     try:
@@ -44,7 +44,12 @@ def download_data(preffix, data):
     data = data['images']
     random.shuffle(data)
 
-    pool = multiprocessing.Pool(processes=20)
+    data_dir = os.path.join('data', preffix)
+    if not os.path.exists(data_dir):
+        print('Creating directory: %s' % (data_dir))
+        os.mkdir(data_dir)
+
+    pool = multiprocessing.Pool(processes=64)
     for d in data:
         d['preffix'] = preffix
 

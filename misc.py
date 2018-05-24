@@ -21,7 +21,7 @@ class FurnitureDataset(Dataset):
         path = f'data/{path}.json'
         self.transform = transform
         img_idx = {int(p.name.split('.')[0])
-                   for p in Path(f'tmp/{preffix}').glob('*.jpg')}
+                   for p in Path(f'data/{preffix}').glob('*.jpg')}
         data = json.load(open(path))
         if 'annotations' in data:
             data = pd.DataFrame(data['annotations'])
@@ -30,9 +30,9 @@ class FurnitureDataset(Dataset):
         self.full_data = data
         nb_total = data.shape[0]
         data = data[data.image_id.isin(img_idx)].copy()
-        data['path'] = data.image_id.map(lambda i: f"tmp/{preffix}/{i}.jpg")
+        data['path'] = data.image_id.map(lambda i: f"data/{preffix}/{i}.jpg")
         self.data = data
-        print(f'[+] dataset `{preffix}` loaded {data.shape[0]} images from {nb_total}')
+        print(f'Dataset `{preffix}` loaded {data.shape[0]} images from {nb_total}')
 
     def __len__(self):
         return self.data.shape[0]

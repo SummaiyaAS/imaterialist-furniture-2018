@@ -19,6 +19,9 @@ densenet121 = M.densenet121
 densenet161 = M.densenet161
 densenet201 = M.densenet201
 
+squeezenet10 = M.squeezenet1_0
+squeezenet11 = M.squeezenet1_1
+
 
 class ResNetFinetune(nn.Module):
     finetune = True
@@ -59,7 +62,7 @@ class DenseNetFinetune(nn.Module):
 class InceptionV3Finetune(nn.Module):
     finetune = True
 
-    def __init__(self, num_classes: int):
+    def __init__(self, num_classes):
         super().__init__()
         self.net = M.inception_v3(pretrained=True)
         self.net.fc = nn.Linear(self.net.fc.in_features, num_classes)
@@ -75,10 +78,31 @@ class InceptionV3Finetune(nn.Module):
             return self.net(x)
 
 
+class SqueezeNetFinetune(nn.Module):
+    finetune = True
+
+    def __init__(self, num_classes, net_cls=M.squeezenet1_1, dropout=False):
+        super().__init__()
+        self.net = net_cls(pretrained=True)
+        if dropout:
+            self.net.fc = nn.Sequential(
+                nn.Dropout(),
+                nn.Linear(self.net.fc.in_features, num_classes),
+            )
+        else:
+            self.net.fc = nn.Linear(self.net.fc.in_features, num_classes)
+
+    def fresh_params(self):
+        return self.net.fc.parameters()
+
+    def forward(self, x):
+        x = self.net(x)
+
+
 class FinetunePretrainedmodels(nn.Module):
     finetune = True
 
-    def __init__(self, num_classes: int, net_cls, net_kwards):
+    def __init__(self, num_classes, net_cls, net_kwards):
         super().__init__()
         self.net = net_cls(**net_kwards)
         self.net.last_linear = nn.Linear(self.net.last_linear.in_features, num_classes)
@@ -100,6 +124,9 @@ densenet121_finetune = partial(DenseNetFinetune, net_cls=M.densenet121)
 
 densenet161_finetune = partial(DenseNetFinetune, net_cls=M.densenet161)
 densenet201_finetune = partial(DenseNetFinetune, net_cls=M.densenet201)
+
+squeezenet10_finetune = partial(SqueezeNetFinetune, net_cls=M.squeezenet1_0)
+squeezenet11_finetune = partial(SqueezeNetFinetune, net_cls=M.squeezenet1_1)
 
 xception_finetune = partial(FinetunePretrainedmodels,
                             net_cls=pretrainedmodels.xception,
