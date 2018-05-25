@@ -14,8 +14,8 @@ from misc import FurnitureDataset, preprocess, preprocess_with_augmentation, NB_
 # For focal loss
 from focal_loss import FocalLoss
 
-BATCH_SIZE = 64
-
+BATCH_SIZE = 32
+NUM_EPOCHS = 20
 
 def get_model(model_name):
     print('Loading model: %s' % (model_name))
@@ -28,8 +28,8 @@ def get_model(model_name):
     else:
         print("Error: Model not found!")
         exit(-1)
-    if use_gpu:
-        model.cuda()
+    # if use_gpu:
+    #     model.cuda()
     print('done')
     return model
 
@@ -75,7 +75,7 @@ def predict(model_name):
 def train(model_name):
     train_dataset = FurnitureDataset('train', transform=preprocess_with_augmentation)
     val_dataset = FurnitureDataset('val', transform=preprocess)
-    training_data_loader = DataLoader(dataset=train_dataset, num_workers=4,
+    training_data_loader = DataLoader(dataset=train_dataset, num_workers=12,
                                       batch_size=BATCH_SIZE,
                                       shuffle=True)
     validation_data_loader = DataLoader(dataset=val_dataset, num_workers=1,
@@ -84,35 +84,31 @@ def train(model_name):
 
     model = get_model(model_name)
 
-    if model_name.endswith("_focal"):
-        print ("Using Focal loss instead of normal cross-entropy")
-        criterion = FocalLoss().cuda()
-    else:
-        criterion = nn.CrossEntropyLoss().cuda()
-
     nb_learnable_params = sum(p.numel() for p in model.fresh_params())
     print('Number of learnable params: %s' % str(nb_learnable_params))
 
-    min_loss = float("inf")
-    lr = 0
-    patience = 0
-    for epoch in range(20):
-        print('Epoch: %d' % epoch)
-        if epoch == 1:
-            lr = 0.00003
-            print('Learning rate: %f' % lr)
-        if patience == 2:
-            patience = 0
-            model.load_state_dict(torch.load('best_val_weight.pth'))
-            lr = lr / 10
-            print('Learning rate: %f' % lr)
-        if epoch == 0:
-            lr = 0.001
-            print('Learning rate: %f' % lr)
-            optimizer = torch.optim.Adam(model.fresh_params(), lr=lr)
-        else:
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
+    # Multi-GPU scaling
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.device_count() > 1:
+        print("Using %d GPUs!" % (torch.cuda.device_count()))
+        model = nn.DataParallel(model)
+    model.to(device)
 
+    lr = 0.001
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
+
+    if model_name.endswith("_focal"):
+        print ("Using Focal loss instead of normal cross-entropy")
+        criterion = FocalLoss().to(device)
+    else:
+        criterion = nn.CrossEntropyLoss().to(device)
+
+    min_loss = float("inf")
+    patience = 0
+    for epoch in range(NUM_EPOCHS):
+        print('Epoch: %d' % epoch)
+        
         running_loss = RunningMean()
         running_score = RunningMean()
 
@@ -124,10 +120,11 @@ def train(model_name):
             inputs = Variable(inputs)
             labels = Variable(labels)
             if use_gpu:
-                inputs = inputs.cuda()
-                labels = labels.cuda()
+                inputs = inputs.to(device)
+                labels = labels.to(device)
 
             optimizer.zero_grad()
+
             outputs = model(inputs)
             _, preds = torch.max(outputs.data, dim=1)
 
@@ -145,8 +142,10 @@ def train(model_name):
         log_loss = criterion(Variable(px), Variable(lx))
         log_loss = log_loss.data[0]
         _, preds = torch.max(px, dim=1)
-        accuracy = torch.mean((preds != lx).float())
-        print('Validation loss: %.5f | Accuracy: %.3f' % (log_loss, accuracy))
+        accuracy = torch.mean((preds == lx).float())
+        error = torch.mean((preds != lx).float())
+        print('Validation loss: %.5f | Accuracy: %.3f | Error: %.3f' % (log_loss, accuracy, error))
+        scheduler.step(log_loss)
 
         if log_loss < min_loss:
             torch.save(model.state_dict(), 'best_val_weight.pth')
