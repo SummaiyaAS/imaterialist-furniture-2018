@@ -17,7 +17,7 @@ class RunningMean:
     @property
     def value(self):
         if self.count:
-            return self.total_value / self.count
+            return float(self.total_value) / self.count
         else:
             return float("inf")
 

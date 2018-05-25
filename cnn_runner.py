@@ -14,7 +14,7 @@ from misc import FurnitureDataset, preprocess, preprocess_with_augmentation, NB_
 # For focal loss
 from focal_loss import FocalLoss
 
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 NUM_EPOCHS = 20
 
 def get_model(model_name):
@@ -92,12 +92,13 @@ def train(model_name):
         model = nn.DataParallel(model)
     model.to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
+    # Use model.fresh_params() to train only the newly initialized weights
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
 
     if model_name.endswith("_focal"):
         print ("Using Focal loss instead of normal cross-entropy")
-        criterion = FocalLoss().to(device)
+        criterion = FocalLoss(NB_CLASSES).to(device)
     else:
         criterion = nn.CrossEntropyLoss().to(device)
 

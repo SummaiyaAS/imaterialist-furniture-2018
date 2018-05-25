@@ -4,6 +4,7 @@
 
 from functools import partial
 
+import torch
 from torch import nn
 import torchvision.models as M
 import pretrainedmodels
@@ -84,20 +85,29 @@ class SqueezeNetFinetune(nn.Module):
     def __init__(self, num_classes, net_cls=M.squeezenet1_1, dropout=False):
         super().__init__()
         self.net = net_cls(pretrained=True)
+        self.num_classes = num_classes
+        final_conv = nn.Conv2d(512, self.num_classes, kernel_size=1)
         if dropout:
-            self.net.fc = nn.Sequential(
-                nn.Dropout(),
-                nn.Linear(self.net.fc.in_features, num_classes),
+            self.classifier = nn.Sequential(
+                nn.Dropout(p=0.5),
+                final_conv,
+                nn.ReLU(inplace=True),
+                nn.AvgPool2d(13, stride=1)
             )
         else:
-            self.net.fc = nn.Linear(self.net.fc.in_features, num_classes)
+            self.classifier = nn.Sequential(
+                final_conv,
+                nn.ReLU(inplace=True),
+                nn.AvgPool2d(13, stride=1)
+            )
 
     def fresh_params(self):
-        return self.net.fc.parameters()
+        return self.classifier.parameters()
 
     def forward(self, x):
-        x = self.net(x)
-
+        x = self.net.features(x)
+        x = self.classifier(x)
+        return x.view(x.size(0), self.num_classes)
 
 class FinetunePretrainedmodels(nn.Module):
     finetune = True
