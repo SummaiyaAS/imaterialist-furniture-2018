@@ -1,4 +1,6 @@
 import argparse
+import shutil
+import os
 
 from tqdm import tqdm
 import torch
@@ -15,8 +17,9 @@ from misc import FurnitureDataset, preprocess, preprocess_with_augmentation, NB_
 from focal_loss import FocalLoss
 
 BATCH_SIZE = 64
-NUM_EPOCHS = 250
+NUM_EPOCHS = 100
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 
 def get_model(model_name):
     print('Loading model: %s' % (model_name))
@@ -29,13 +32,21 @@ def get_model(model_name):
     else:
         print("Error: Model not found!")
         exit(-1)
+
+    # Multi-GPU scaling
+    if torch.cuda.device_count() > 1:
+        print("Parallelizing model over %d GPUs!" % (torch.cuda.device_count()))
+        model = nn.DataParallel(model)
+    model.to(device)
+
     print('Model loaded successfully!')
     return model
 
 
-def predict(model_name):
+def predict(model_name, outputDir):
     model = get_model(model_name)
-    model.load_state_dict(torch.load('best_val_weight_' + model_name + '.pth'))
+    model_checkpoint = torch.load(os.path.join(outputDir, 'best_val_acc_weight_' + model_name + '.pth'))
+    model.load_state_dict(model_checkpoint)
     model.eval()
 
     tta_preprocess = [preprocess, preprocess_hflip]
@@ -48,16 +59,12 @@ def predict(model_name):
                                  shuffle=False)
         data_loaders.append(data_loader)
 
-    # Shift model to GPU
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
     lx, px = utils.predict_tta(model, data_loaders, device)
     data = {
         'lx': lx.cpu(),
         'px': px.cpu(),
     }
-    torch.save(data, 'test_prediction_' + model_name + '.pth')
+    torch.save(data, os.path.join(outputDir, 'test_prediction_' + model_name + '.pth'))
 
     data_loaders = []
     for transform in tta_preprocess:
@@ -72,10 +79,10 @@ def predict(model_name):
         'lx': lx.cpu(),
         'px': px.cpu(),
     }
-    torch.save(data, 'val_prediction_' + model_name + '.pth')
+    torch.save(data, os.path.join(outputDir, 'val_prediction_' + model_name + '.pth'))
 
 
-def train(model_name):
+def train(model_name, outputDir):
     train_dataset = FurnitureDataset('train', transform=preprocess_with_augmentation)
     val_dataset = FurnitureDataset('val', transform=preprocess)
     training_data_loader = DataLoader(dataset=train_dataset, num_workers=12,
@@ -90,14 +97,8 @@ def train(model_name):
     nb_learnable_params = sum(p.numel() for p in model.fresh_params())
     print('Number of learnable params: %s' % str(nb_learnable_params))
 
-    # Multi-GPU scaling
-    if torch.cuda.device_count() > 1:
-        print("Using %d GPUs!" % (torch.cuda.device_count()))
-        model = nn.DataParallel(model)
-    model.to(device)
-
     # Use model.fresh_params() to train only the newly initialized weights
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
 
     if model_name.endswith("_focal"):
@@ -107,6 +108,7 @@ def train(model_name):
         criterion = nn.CrossEntropyLoss().to(device)
 
     min_loss = float("inf")
+    max_acc = 0.0
     patience = 0
     for epoch in range(NUM_EPOCHS):
         print('Epoch: %d' % epoch)
@@ -150,12 +152,25 @@ def train(model_name):
         print('Validation loss: %.5f | Accuracy: %.3f | Error: %.3f' % (log_loss, accuracy, error))
         scheduler.step(log_loss)
 
+        # Save model after each epoch
+        torch.save(model.state_dict(), os.path.join(outputDir, 'weight_' + model_name + '.pth'))
+
+        betterModelFound = False
         if log_loss < min_loss:
-            torch.save(model.state_dict(), 'best_val_weight_' + model_name + '.pth')
-            print('Validation score improved from %.5f to %.5f. Saved!' % (min_loss, log_loss))
+            torch.save(model.state_dict(), os.path.join(outputDir, 'best_val_loss_weight_' + model_name + '.pth'))
+            print('Validation score improved from %.5f to %.5f. Model snapshot saved!' % (min_loss, log_loss))
             min_loss = log_loss
             patience = 0
-        else:
+            betterModelFound = True
+
+        if accuracy > max_acc:
+            torch.save(model.state_dict(), os.path.join(outputDir, 'best_val_acc_weight_' + model_name + '.pth'))
+            print('Validation accuracy improved from %.5f to %.5f. Model snapshot saved!' % (max_acc, accuracy))
+            max_acc = accuracy
+            patience = 0
+            betterModelFound = True
+
+        if not betterModelFound:
             patience += 1
 
 
@@ -163,9 +178,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['train', 'predict'])
     parser.add_argument('model', choices=['densenet', 'squeezenet', 'resnet', 'densenet_focal', 'squeezenet_focal'])
+    parser.add_argument('--experiment', dest='experiment', action='store', type=str, default='01', help='Name of the experiment')
     args = parser.parse_args()
-    print('Mode: %s | Model: %s' % (args.mode, args.model))
+    outputDir = "Experiment_" + args.experiment + "_" + args.model
+    print('Mode: %s | Model: %s | Output directory: %s' % (args.mode, args.model, outputDir))
+
     if args.mode == 'train':
-        train(args.model)
+        if os.path.exists(outputDir):
+            print ("Removing previous experiment directory!")
+            shutil.rmtree(outputDir)
+        os.mkdir(outputDir)
+        train(args.model, outputDir)
     elif args.mode == 'predict':
-        predict(args.model)
+        predict(args.model, outputDir)

@@ -12,7 +12,7 @@ IMAGE_SIZE = 224
 
 
 class FurnitureDataset(Dataset):
-    def __init__(self, preffix: str, transform=None):
+    def __init__(self, preffix, transform=None):
         self.preffix = preffix
         if preffix == 'val':
             path = 'validation'

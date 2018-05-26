@@ -11,6 +11,10 @@ Result: public leaderboard score 0.15026
 4. Predict `python cnn_runner.py predict`
 5. Generate submission `python submit.py`
 
+# Note:
+The model will output an error during restore if trained with multiple GPUs and tested with a single one.
+
 Next steps:
 - add 12TTA: 0.14583
 - add other model: 0.14244
+
