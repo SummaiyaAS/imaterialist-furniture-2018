@@ -8,14 +8,15 @@ from torch.autograd import Variable
 
 import models
 import utils
-from utils import RunningMean, use_gpu
+from utils import RunningMean
 from misc import FurnitureDataset, preprocess, preprocess_with_augmentation, NB_CLASSES, preprocess_hflip
 
 # For focal loss
 from focal_loss import FocalLoss
 
 BATCH_SIZE = 64
-NUM_EPOCHS = 20
+NUM_EPOCHS = 250
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def get_model(model_name):
     print('Loading model: %s' % (model_name))
@@ -28,7 +29,7 @@ def get_model(model_name):
     else:
         print("Error: Model not found!")
         exit(-1)
-    print('done')
+    print('Model loaded successfully!')
     return model
 
 
@@ -47,7 +48,11 @@ def predict(model_name):
                                  shuffle=False)
         data_loaders.append(data_loader)
 
-    lx, px = utils.predict_tta(model, data_loaders)
+    # Shift model to GPU
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    lx, px = utils.predict_tta(model, data_loaders, device)
     data = {
         'lx': lx.cpu(),
         'px': px.cpu(),
@@ -62,7 +67,7 @@ def predict(model_name):
                                  shuffle=False)
         data_loaders.append(data_loader)
 
-    lx, px = utils.predict_tta(model, data_loaders)
+    lx, px = utils.predict_tta(model, data_loaders, device)
     data = {
         'lx': lx.cpu(),
         'px': px.cpu(),
@@ -86,7 +91,6 @@ def train(model_name):
     print('Number of learnable params: %s' % str(nb_learnable_params))
 
     # Multi-GPU scaling
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if torch.cuda.device_count() > 1:
         print("Using %d GPUs!" % (torch.cuda.device_count()))
         model = nn.DataParallel(model)
@@ -118,9 +122,8 @@ def train(model_name):
 
             inputs = Variable(inputs)
             labels = Variable(labels)
-            if use_gpu:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
             optimizer.zero_grad()
 
@@ -138,7 +141,7 @@ def train(model_name):
             pbar.set_description('%.5f %.3f %.3f' % (running_loss.value, running_accuracy.value, running_error.value))
         print('Epoch: %d | Running loss: %.5f | Running accuracy: %.3f | Running error: %.3f' % (epoch, running_loss.value, running_accuracy.value, running_error.value))
 
-        lx, px = utils.predict(model, validation_data_loader)
+        lx, px = utils.predict(model, validation_data_loader, device)
         log_loss = criterion(Variable(px), Variable(lx))
         log_loss = log_loss.data[0]
         _, preds = torch.max(px, dim=1)
@@ -159,7 +162,7 @@ def train(model_name):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['train', 'predict'])
-    parser.add_argument('model', choices=['densenet', 'squeezenet', 'resnet', 'squeezenet_focal'])
+    parser.add_argument('model', choices=['densenet', 'squeezenet', 'resnet', 'densenet_focal', 'squeezenet_focal'])
     args = parser.parse_args()
     print('Mode: %s | Model: %s' % (args.mode, args.model))
     if args.mode == 'train':

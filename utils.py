@@ -2,9 +2,6 @@ import torch
 from torch.autograd import Variable
 from tqdm import tqdm
 
-use_gpu = torch.cuda.is_available()
-
-
 class RunningMean:
     def __init__(self, value=0, count=0):
         self.total_value = value
@@ -25,7 +22,7 @@ class RunningMean:
         return str(self.value)
 
 
-def predict(model, dataloader):
+def predict(model, dataloader, device):
     all_labels = []
     all_outputs = []
     model.eval()
@@ -35,17 +32,16 @@ def predict(model, dataloader):
         all_labels.append(labels)
 
         inputs = Variable(inputs, volatile=True)
-        if use_gpu:
-            inputs = inputs.cuda()
+        inputs = inputs.to(device)
 
         outputs = model(inputs)
         all_outputs.append(outputs.data.cpu())
 
     all_outputs = torch.cat(all_outputs)
     all_labels = torch.cat(all_labels)
-    if use_gpu:
-        all_labels = all_labels.cuda()
-        all_outputs = all_outputs.cuda()
+
+    all_labels = all_labels.to(device)
+    all_outputs = all_outputs.to(device)
 
     return all_labels, all_outputs
 
@@ -56,11 +52,11 @@ def safe_stack_2array(a, b, dim=0):
     return torch.stack((a, b), dim=dim)
 
 
-def predict_tta(model, dataloaders):
+def predict_tta(model, dataloaders, device):
     prediction = None
     lx = None
     for dataloader in dataloaders:
-        lx, px = predict(model, dataloader)
+        lx, px = predict(model, dataloader, device)
         prediction = safe_stack_2array(prediction, px, dim=-1)
 
     return lx, prediction

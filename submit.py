@@ -24,8 +24,8 @@ def generate_final_predictions(model_name):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
-    parser.add_argument('model', choices=['densenet', 'squeezenet', 'resnet', 'squeezenet_focal'])
-    args = parser.parse_args()
+	parser.add_argument('model', choices=['densenet', 'squeezenet', 'resnet', 'densenet_focal', 'squeezenet_focal'])
+	args = parser.parse_args()
 
-    print('Model: %s' % (args.model))
-    generate_final_predictions(args.model)
+	print('Model: %s' % (args.model))
+	generate_final_predictions(args.model)
